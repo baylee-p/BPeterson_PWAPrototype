@@ -11,7 +11,7 @@ const assets = [
   '/img/dish.png',
   'https://fonts.googleapis.com/icon?family=Material+Icons',
   'https://fonts.gstatic.com/s/materialicons/v47/flUhRq6tzZclQEJ-Vdg-IuiaDsNcIhQ8tQ.woff2'
-  '/pages/fallback.html'
+  //'/pages/fallback.html'
 ];
 
 // cache size limit function
@@ -58,6 +58,7 @@ self.addEventListener('fetch', evt => {
         return cacheRes || fetch(evt.request).then(fetchRes => {
             return caches.open(dynamicCacheName).then(cache => {
                 cache.put(evt.request.url, fetchRes.clone());
+                // check cached items size
                 limitCacheSize(dynamicCacheName, 15);
                 return fetchRes;
             })
