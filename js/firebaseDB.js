@@ -12,9 +12,17 @@
   // TODO: Add SDKs for Firebase products that you want to use
   // https://firebase.google.com/docs/web/setup#available-libraries
 
+    import {
+        initializeApp
+    } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+
+    import { getAuth } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+    const auth = getAuth(app);
+
   // Your web app's Firebase configuration
   // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-  const firebaseConfig = {
+    const firebaseConfig = {
     apiKey: "AIzaSyCjcfnZkPNCrvFFsPfp4QNMlpa-dukF4P4",
     authDomain: "myrecipebook-fc07c.firebaseapp.com",
     projectId: "myrecipebook-fc07c",
@@ -28,16 +36,23 @@
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
+  export { auth };
+
   // Add a Recipe
   export async function addRecipe(recipe) {
-    try{
-        const docRef = await addDoc(collection(db, "recipes"), recipes);
-        return {id: docRef.id, ...recipe}
+    const user = auth.currentUser;
+    if (!user) {
+        console.error("User not authenticated");
+        return;
     }
-    catch(error) {
-        console.error("error adding recipe: ", error);
+    try {
+        const docRef = await addDoc(collection(db, "recipes"), { uid: user.uid, ...recipe });
+        return { id: docRef.id, ...recipe };
+    } catch (error) {
+        console.error("Error adding recipe:", error);
     }
-  }
+}
+
   // Get Recipe
   export async function getRecipe(params) {
     const recipes = [];
@@ -71,3 +86,39 @@
         console.error("error editing recipe: ", error);
     }
   }
+
+  import { collection, addDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+import { auth } from "./firebaseDB.js";
+
+const db = getFirestore();
+
+const addRecipe = async (recipe) => {
+    const user = auth.currentUser;
+    if (!user) {
+        console.error("User not signed in");
+        return;
+    }
+    try {
+        await addDoc(collection(db, "recipes"), {
+            uid: user.uid, // Associate with user
+            ...recipe
+        });
+        console.log("Recipe added to Firestore:", recipe);
+    } catch (error) {
+        console.error("Firestore Add Error:", error.message);
+    }
+};
+
+const loadRecipes = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+        console.error("User not signed in");
+        return [];
+    }
+    const recipesQuery = query(
+        collection(db, "recipes"),
+        where("uid", "==", user.uid)
+    );
+    const snapshot = await getDocs(recipesQuery);
+    return snapshot.docs.map(doc => doc.data());
+};

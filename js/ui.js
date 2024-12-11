@@ -1,3 +1,10 @@
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+import { auth } from "./firebaseDB.js";
+import { signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+import { signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+import { getDocs, collection } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+import { addDoc, collection } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
 document.addEventListener('DOMContentLoaded', function() {
     // nav menu
     const menus = document.querySelectorAll('.side-menu');
@@ -5,10 +12,119 @@ document.addEventListener('DOMContentLoaded', function() {
     // add recipe form
     const forms = document.querySelectorAll('.side-form');
     M.Sidenav.init(forms, {edge: 'left'});
+
+    // Load Recipes
+    loadRecipes();
 });
 
-  // Load recipes from the IndexedDB
-  loadRecipes();
+document.querySelector('#login-form').addEventListener('submit', async (e) => {
+    e.preventDefault(); // Prevent form submission
+    const email = document.querySelector('#email').value;
+    const password = document.querySelector('#password').value;
+    const errorElement = document.querySelector('#login-error');
+
+    try {
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        console.log('User signed in:', userCredential.user);
+        errorElement.textContent = ''; // Clear any previous errors
+    } catch (error) {
+        console.error('Login error:', error.message);
+        errorElement.textContent = error.message; // Display the error to the user
+    }
+});
+
+onAuthStateChanged(auth, (user) => {
+    const loginSection = document.querySelector('#login-section');
+    if (user) {
+        console.log("User signed in:", user.uid);
+        document.querySelector('#auth-status').textContent = `Signed in as: ${user.email}`;
+        loginSection.style.display = 'none'; // Hide login form
+        loadRecipesFromDB(); // Load user-specific recipes
+    } else {
+        console.log("User signed out");
+        document.querySelector('#auth-status').textContent = "Not signed in";
+        loginSection.style.display = 'block'; // Show login form
+    }
+});
+
+document.querySelector('#logout-button').addEventListener('click', async () => {
+    try {
+        await signOut(auth);
+        console.log('User signed out');
+        document.querySelector('#logout-button').style.display = 'none'; // Hide logout button
+    } catch (error) {
+        console.error('Logout error:', error.message);
+    }
+});
+
+
+async function syncFirebaseToIndexedDB() {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const db = await createDB();
+    const tx = db.transaction("recipes", "readwrite");
+    const store = tx.objectStore("recipes");
+
+    const snapshot = await getDocs(collection(db, "recipes"));
+    snapshot.forEach((doc) => {
+        const data = { id: doc.id, ...doc.data() };
+        store.put(data); // Use `put` to avoid duplicates
+    });
+
+    console.log("Data synced from Firebase to IndexedDB");
+}
+
+
+async function syncIndexedDBToFirebase() {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const db = await createDB();
+    const tx = db.transaction("recipes", "readonly");
+    const store = tx.objectStore("recipes");
+    const unsyncedRecipes = (await store.getAll()).filter(recipe => !recipe.synced);
+
+    for (const recipe of unsyncedRecipes) {
+        const docRef = await addDoc(collection(db, "recipes"), { ...recipe, uid: user.uid });
+        recipe.synced = true;
+
+        // Update the synced flag in IndexedDB
+        const updateTx = db.transaction("recipes", "readwrite");
+        const updateStore = updateTx.objectStore("recipes");
+        await updateStore.put(recipe);
+    }
+
+    console.log("Data synced from IndexedDB to Firebase");
+}
+
+window.addEventListener("online", async () => {
+    console.log("Online - syncing data...");
+    await syncIndexedDBToFirebase();
+    await syncFirebaseToIndexedDB();
+});
+
+
+// Show/hide the logout button based on auth state
+onAuthStateChanged(auth, (user) => {
+    const logoutButton = document.querySelector('#logout-button');
+    if (user) {
+        logoutButton.style.display = 'block';
+    } else {
+        logoutButton.style.display = 'none';
+    }
+});
+
+
+  // Attach event listener to add recipes
+  document.querySelector('#add-recipe-button').addEventListener('click', () => {
+    const recipe = {
+        name: document.querySelector('#recipe-name').value,
+        ingredients: document.querySelector('#recipe-ingredients').value.split(','),
+        instructions: document.querySelector('#recipe-instructions').value,
+    };
+    addRecipe(recipe);
+  });
 
   // Check storage usage
   checkStorageUsage();
@@ -25,21 +141,54 @@ if ("serviceWorker" in navigator) {
 
     // Create the IndexedDB database
     async function createDB() {
-    const db = await openDB("MyRecipeBook", 1, {
-      upgrade(db) {
-        const store = db.createObjectStore("recipes", {
-          keyPath: "id",
-          autoIncrement: true,
+    try {
+        const db = await openDB("MyRecipeBook", 1, {
+            upgrade(db) {
+                if (!db.objectStoreNames.contains("recipes")) {
+                    db.createObjectStore("recipes", {
+                        keyPath: "id",
+                        autoIncrement: true,
+                    });
+                }
+            },
         });
-        store.createIndex("status", "status");
-      },
-    });
-    return db;
-  }
-  
+        console.log("IndexedDB initialized successfully");
+        return db;
+    } catch (error) {
+        console.error("Error initializing IndexedDB:", error);
+    }
+    }
+
+    // Load recipes from the IndexedDB
+    loadRecipes();
+
+    async function getAllRecipes() {
+    const db = await createDB();
+    const transaction = db.transaction("recipes", "readonly");
+    const store = transaction.objectStore("recipes");
+    const recipes = await store.getAll();
+    console.log("Retrieved recipes:", recipes);
+    return recipes;
+    }
+
     // Add Recipe with Transaction
     async function addRecipe(recipe) {
+    const user = auth.currentUser;
+    if (!user) {
+        console.error("User not authenticated");
+        return;
+    }
+
     const db = await createDB();
+    const tx = db.transaction("recipes", "readwrite");
+    const store = tx.objectStore("recipes");
+
+    recipe.synced = false; // Mark as unsynced
+    await store.add(recipe);
+
+    console.log("Recipe added offline:", recipe);
+}
+
   
     // Start a transaction
     const tx = db.transaction("recipes", "readwrite");
@@ -215,3 +364,75 @@ async function requestPersistentStorage() {
       }
     }
   }
+
+import { auth } from "./firebaseDB.js";
+import {
+    signInWithEmailAndPassword,
+    signOut
+} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+// Sign-In
+document.querySelector('#sign-in-button').addEventListener('click', async () => {
+    const email = document.querySelector('#email').value;
+    const password = document.querySelector('#password').value;
+    try {
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        console.log('Signed in as:', userCredential.user.uid);
+    } catch (error) {
+        console.error('Sign-In Error:', error.message);
+    }
+});
+
+// Sign-Out
+document.querySelector('#sign-out-button').addEventListener('click', async () => {
+    try {
+        await signOut(auth);
+        console.log('Signed out successfully');
+    } catch (error) {
+        console.error('Sign-Out Error:', error.message);
+    }
+});
+
+
+onAuthStateChanged(auth, (user) => {
+    if (user) {
+        console.log("User signed in:", user.uid);
+        document.querySelector('#auth-status').textContent = `Signed in as: ${user.email}`;
+        // Load user-specific data
+        loadRecipes(); // Call your data loading function
+    } else {
+        console.log("No user signed in");
+        document.querySelector('#auth-status').textContent = "Not signed in";
+        // Optionally clear the UI or show default content
+    }
+});
+
+const addRecipeToDB = async (recipe) => {
+    const user = auth.currentUser;
+    if (!user) {
+        console.error("User not signed in");
+        return;
+    }
+    const db = await openDatabase();
+    const transaction = db.transaction('recipes', 'readwrite');
+    const store = transaction.objectStore('recipes');
+    store.add({
+        uid: user.uid, // Associate with user
+        ...recipe
+    });
+    console.log("Recipe added to IndexedDB:", recipe);
+};
+
+async function loadRecipesFromDB() {
+    const user = auth.currentUser;
+    if (!user) {
+        console.error("User not authenticated");
+        return [];
+    }
+    const db = await createDB();
+    const tx = db.transaction("recipes", "readonly");
+    const store = tx.objectStore("recipes");
+    const allRecipes = await store.getAll();
+    return allRecipes.filter(recipe => recipe.uid === user.uid);
+}
+
