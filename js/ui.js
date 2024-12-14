@@ -1,438 +1,199 @@
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { auth } from "./firebaseDB.js";
-import { signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { getDocs, collection } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
-import { addDoc, collection } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+// Import idb library
+const { openDB } = idb;
 
-document.addEventListener('DOMContentLoaded', function() {
-    // nav menu
-    const menus = document.querySelectorAll('.side-menu');
-    M.Sidenav.init(menus, {edge: 'right'});
-    // add recipe form
-    const forms = document.querySelectorAll('.side-form');
-    M.Sidenav.init(forms, {edge: 'left'});
+// Debugging log: Ensure idb is loaded
+if (openDB) {
+    console.log('idb library loaded successfully.');
+} else {
+    console.error('Failed to load idb library.');
+}
 
-    // Load Recipes
+document.addEventListener('DOMContentLoaded', function () {
+    // Initialize side navigation menus
+    try {
+        const menus = document.querySelectorAll('.side-menu');
+        M.Sidenav.init(menus, { edge: 'right' });
+        console.log('Navigation menus initialized:', menus);
+
+        const forms = document.querySelectorAll('.side-form');
+        M.Sidenav.init(forms, { edge: 'left' });
+        console.log('Side forms initialized:', forms);
+    } catch (error) {
+        console.error('Failed to initialize Materialize Sidenav:', error);
+    }
+
+    // Load recipes from IndexedDB
     loadRecipes();
-});
 
-document.querySelector('#login-form').addEventListener('submit', async (e) => {
-    e.preventDefault(); // Prevent form submission
-    const email = document.querySelector('#email').value;
-    const password = document.querySelector('#password').value;
-    const errorElement = document.querySelector('#login-error');
-
-    try {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        console.log('User signed in:', userCredential.user);
-        errorElement.textContent = ''; // Clear any previous errors
-    } catch (error) {
-        console.error('Login error:', error.message);
-        errorElement.textContent = error.message; // Display the error to the user
-    }
-});
-
-onAuthStateChanged(auth, (user) => {
-    const loginSection = document.querySelector('#login-section');
-    if (user) {
-        console.log("User signed in:", user.uid);
-        document.querySelector('#auth-status').textContent = `Signed in as: ${user.email}`;
-        loginSection.style.display = 'none'; // Hide login form
-        loadRecipesFromDB(); // Load user-specific recipes
+    // Event listener for "Add Recipe" button
+    const addRecipeButton = document.querySelector('.add-btn');
+    if (addRecipeButton) {
+        addRecipeButton.addEventListener('click', () => {
+            try {
+                const recipeForm = document.querySelector('#side-form');
+                if (recipeForm) {
+                    // Show the form via Materialize sidenav
+                    const instance = M.Sidenav.getInstance(recipeForm);
+                    if (instance) {
+                        instance.open();
+                        console.log('Recipe form opened successfully.');
+                    } else {
+                        console.error('Materialize instance for #side-form not found.');
+                    }
+                } else {
+                    console.error('Recipe form not found. Ensure it exists with ID "side-form".');
+                }
+            } catch (error) {
+                console.error('Error when opening Add Recipe form:', error);
+            }
+        });
     } else {
-        console.log("User signed out");
-        document.querySelector('#auth-status').textContent = "Not signed in";
-        loginSection.style.display = 'block'; // Show login form
-    }
-});
-
-document.querySelector('#logout-button').addEventListener('click', async () => {
-    try {
-        await signOut(auth);
-        console.log('User signed out');
-        document.querySelector('#logout-button').style.display = 'none'; // Hide logout button
-    } catch (error) {
-        console.error('Logout error:', error.message);
-    }
-});
-
-
-async function syncFirebaseToIndexedDB() {
-    const user = auth.currentUser;
-    if (!user) return;
-
-    const db = await createDB();
-    const tx = db.transaction("recipes", "readwrite");
-    const store = tx.objectStore("recipes");
-
-    const snapshot = await getDocs(collection(db, "recipes"));
-    snapshot.forEach((doc) => {
-        const data = { id: doc.id, ...doc.data() };
-        store.put(data); // Use `put` to avoid duplicates
-    });
-
-    console.log("Data synced from Firebase to IndexedDB");
-}
-
-
-async function syncIndexedDBToFirebase() {
-    const user = auth.currentUser;
-    if (!user) return;
-
-    const db = await createDB();
-    const tx = db.transaction("recipes", "readonly");
-    const store = tx.objectStore("recipes");
-    const unsyncedRecipes = (await store.getAll()).filter(recipe => !recipe.synced);
-
-    for (const recipe of unsyncedRecipes) {
-        const docRef = await addDoc(collection(db, "recipes"), { ...recipe, uid: user.uid });
-        recipe.synced = true;
-
-        // Update the synced flag in IndexedDB
-        const updateTx = db.transaction("recipes", "readwrite");
-        const updateStore = updateTx.objectStore("recipes");
-        await updateStore.put(recipe);
+        console.error('Add Recipe button not found. Ensure it exists with class "add-btn".');
     }
 
-    console.log("Data synced from IndexedDB to Firebase");
-}
+    // Hook form submission to addRecipe
+    const recipeFormElement = document.querySelector('#side-form form');
+    if (recipeFormElement) {
+        recipeFormElement.addEventListener('submit', async (e) => {
+            e.preventDefault();
 
-window.addEventListener("online", async () => {
-    console.log("Online - syncing data...");
-    await syncIndexedDBToFirebase();
-    await syncFirebaseToIndexedDB();
-});
+            try {
+                // Get form data
+                const title = document.querySelector('#title').value.trim();
+                const ingredients = document.querySelector('#ingredients').value.trim();
 
+                if (title && ingredients) {
+                    const newRecipe = { title, ingredients };
 
-// Show/hide the logout button based on auth state
-onAuthStateChanged(auth, (user) => {
-    const logoutButton = document.querySelector('#logout-button');
-    if (user) {
-        logoutButton.style.display = 'block';
+                    // Add the recipe and reset the form
+                    await addRecipe(newRecipe);
+                    console.log('New recipe added successfully:', newRecipe);
+                    recipeFormElement.reset();
+
+                    const instance = M.Sidenav.getInstance(document.querySelector('#side-form'));
+                    if (instance) instance.close();
+                } else {
+                    alert('Please fill in all fields.');
+                }
+            } catch (error) {
+                console.error('Error submitting recipe form:', error);
+            }
+        });
     } else {
-        logoutButton.style.display = 'none';
+        console.error('Recipe form element not found.');
     }
+
+    // Request persistent storage for IndexedDB
+    requestPersistentStorage();
 });
 
-
-  // Attach event listener to add recipes
-  document.querySelector('#add-recipe-button').addEventListener('click', () => {
-    const recipe = {
-        name: document.querySelector('#recipe-name').value,
-        ingredients: document.querySelector('#recipe-ingredients').value.split(','),
-        instructions: document.querySelector('#recipe-instructions').value,
-    };
-    addRecipe(recipe);
-  });
-
-  // Check storage usage
-  checkStorageUsage();
-
-  // Request persistent storage
-  requestPersistentStorage();
-
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker
-    .register("/serviceworker.js")
-    .then((req) => console.log("Service Worker Registered!", req))
-    .catch((err) => console.log("Service Worker registration failed", err));
+async function deleteRecipe(id) {
+    try {
+        console.log(`Attempting to delete recipe with id: ${id}`);
+        const db = await openDB('MyRecipeBook', 1);
+        const tx = db.transaction('recipes', 'readwrite');
+        const store = tx.objectStore('recipes');
+        await store.delete(id); // Delete the recipe from IndexedDB
+        console.log(`Recipe with id ${id} successfully deleted.`);
+    } catch (error) {
+        console.error(`Failed to delete recipe with id ${id}:`, error);
+    }
 }
 
-    // Create the IndexedDB database
-    async function createDB() {
+// Load recipes from IndexedDB
+async function loadRecipes() {
     try {
-        const db = await openDB("MyRecipeBook", 1, {
+        const db = await openDB('MyRecipeBook', 1, {
             upgrade(db) {
-                if (!db.objectStoreNames.contains("recipes")) {
-                    db.createObjectStore("recipes", {
-                        keyPath: "id",
+                if (!db.objectStoreNames.contains('recipes')) {
+                    const store = db.createObjectStore('recipes', {
+                        keyPath: 'id',
                         autoIncrement: true,
                     });
+                    store.createIndex('title', 'title', { unique: false });
                 }
             },
         });
-        console.log("IndexedDB initialized successfully");
-        return db;
-    } catch (error) {
-        console.error("Error initializing IndexedDB:", error);
-    }
-    }
 
-    // Load recipes from the IndexedDB
-    loadRecipes();
+        const tx = db.transaction('recipes', 'readonly');
+        const store = tx.objectStore('recipes');
+        const recipes = await store.getAll();
 
-    async function getAllRecipes() {
-    const db = await createDB();
-    const transaction = db.transaction("recipes", "readonly");
-    const store = transaction.objectStore("recipes");
-    const recipes = await store.getAll();
-    console.log("Retrieved recipes:", recipes);
-    return recipes;
-    }
+        console.log('Fetched recipes from IndexedDB:', recipes);
 
-    // Add Recipe with Transaction
-    async function addRecipe(recipe) {
-    const user = auth.currentUser;
-    if (!user) {
-        console.error("User not authenticated");
-        return;
-    }
+        const recipeList = document.getElementById('recipe-list');
+        if (recipeList) {
+            recipeList.innerHTML = ''; // Clear existing content
 
-    const db = await createDB();
-    const tx = db.transaction("recipes", "readwrite");
-    const store = tx.objectStore("recipes");
+            recipes.forEach(recipe => {
+                // Create the recipe card
+                const card = document.createElement('div');
+                card.className = 'card-panel recipe white row';
+                card.setAttribute('data-id', recipe.id); // Add data-id for easy identification
 
-    recipe.synced = false; // Mark as unsynced
-    await store.add(recipe);
+                // Add image
+                const img = document.createElement('img');
+                img.src = '/img/dish.png'; // Placeholder image
+                img.alt = 'recipe thumb';
+                card.appendChild(img);
 
-    console.log("Recipe added offline:", recipe);
-}
+                // Add recipe details
+                const details = document.createElement('div');
+                details.className = 'recipe-details';
 
-  
-    // Start a transaction
-    const tx = db.transaction("recipes", "readwrite");
-    const store = tx.objectStore("recipes");
-  
-    // Add recipe to store
-    await store.add(recipe);
-  
-    // Complete transaction
-    await tx.done;
-  
-    // Update storage usage
-    checkStorageUsage();
-    }  
+                const title = document.createElement('div');
+                title.className = 'recipe-title';
+                title.textContent = recipe.title;
+                details.appendChild(title);
 
-    // Delete Recipe with Transaction
-    async function deleteRecipe(id) {
-    const db = await createDB();
-  
-    // Start a transaction
-    const tx = db.transaction("recipes", "readwrite");
-    const store = tx.objectStore("recipes");
-  
-    // Delete recipe by id
-    await store.delete(id);
-  
-    // Complete transaction
-    await tx.done;
-  
-    // Remove recipe from UI
-    const recipeCard = document.querySelector(`[data-id="${id}"]`);
-    if (recipeCard) {
-      recipeCard.remove();
-    }
+                const ingredients = document.createElement('div');
+                ingredients.className = 'recipe-ingredients';
+                ingredients.textContent = recipe.ingredients;
+                details.appendChild(ingredients);
 
-    // Update storage usage
-    checkStorageUsage();
-    }
+                card.appendChild(details);
 
-    // Load Recipes with Transaction
-    async function loadRecipes() {
-    const db = await createDB();
+                // Add delete button
+                const deleteBtn = document.createElement('div');
+                deleteBtn.className = 'recipe-delete';
+                const deleteIcon = document.createElement('i');
+                deleteIcon.className = 'material-icons';
+                deleteIcon.textContent = 'delete_outline';
+                deleteBtn.appendChild(deleteIcon);
+                card.appendChild(deleteBtn);
 
-    // Start a transaction (read-only)
-    const tx = db.transaction("recipes", "readonly");
-    const store = tx.objectStore("recipes");
+                // Attach delete functionality
+                deleteBtn.addEventListener('click', async () => {
+                    console.log(`Delete button clicked for recipe with id: ${recipe.id}`);
+                    await deleteRecipe(recipe.id); // Call deleteRecipe to remove from IndexedDB
+                    recipeList.removeChild(card); // Immediately remove the card from the DOM
+                });
 
-    // Get all recipes
-    const recipes = await store.getAll();
+                // Append the card to the recipe list
+                recipeList.appendChild(card);
+            });
 
-    // Complete transaction
-    await tx.done;
-
-    const recipeContainer = document.querySelector(".recipes");
-    recipeContainer.innerHTML = ""; // Clear current recipes
-
-    recipes.forEach((recipe) => {
-        displayRecipe(recipe);
-    });
-    }
-
-    // Display Recipe using the existing HTML structure
-    function displayRecipe(recipe) {
-    const recipeContainer = document.querySelector(".recipes");
-    const html = `
-      <div class="card-panel white row valign-wrapper" data-id="${recipe.id}">
-        <div class="col s2">
-          <img
-            src="/img/icons/dish.png"
-            class="circle responsive-img"
-            alt="Recipe icon"
-            style="max-width: 100%; height: auto"
-          />
-        </div>
-        <div class="recipe-detail col s8">
-          <h5 class="recipe-title black-text">${recipe.title}</h5>
-          <div class="recipe-description">${recipe.description}</div>
-        </div>
-        <div class="col s2 right-align">
-          <button class="recipe-delete btn-flat" aria-label="Delete recipe">
-            <i class="material-icons black-text text-darken-1" style="font-size: 30px">delete</i>
-          </button>
-        </div>
-      </div>
-    `;
-    recipeContainer.insertAdjacentHTML("beforeend", html);
-    
-    // Attach delete event listener
-     const deleteButton = recipeContainer.querySelector(
-    `[data-id="${recipe.id}"] .recipe-delete`
-  );
-  deleteButton.addEventListener("click", () => deleteRecipe(recipe.id));
-}
-
-// Add Recipe Button Listener
-const addRecipeButton = document.querySelector(".btn-small");
-addRecipeButton.addEventListener("click", async () => {
-  const titleInput = document.querySelector("#title");
-  const descriptionInput = document.querySelector("#description");
-
-  const recipe = {
-    title: titleInput.value,
-    ingredients: ingredientInput.value,
-  };
-
-  await addRecipe(recipe); // Add recipe to IndexedDB
-
-  displayRecipe(recipe); // Add recipe to the UI
-
-  // Clear input fields after adding
-  titleInput.value = "";
-  descriptionInput.value = "";
-
-  // Close the side form after adding
-  const forms = document.querySelector(".side-form");
-  const instance = M.Sidenav.getInstance(forms);
-  instance.close();
-});
-
-// Function to check storage usage
-async function checkStorageUsage() {
-    if (navigator.storage && navigator.storage.estimate) {
-      const { usage, quota } = await navigator.storage.estimate();
-      const usageInMB = (usage / (1024 * 1024)).toFixed(2); // Convert to MB
-      const quotaInMB = (quota / (1024 * 1024)).toFixed(2); // Convert to MB
-  
-      console.log(`Storage used: ${usageInMB} MB of ${quotaInMB} MB`);
-
-// Update the UI with storage info
-const storageInfo = document.querySelector("#storage-info");
-if (storageInfo) {
-  storageInfo.textContent = `Storage used: ${usageInMB} MB of ${quotaInMB} MB`;
-}
-
-// Warn the user if storage usage exceeds 80%
-if (usage / quota > 0.8) {
-    const storageWarning = document.querySelector("#storage-warning");
-    if (storageWarning) {
-      storageWarning.textContent =
-        "Warning: You are running low on storage space. Please delete old recipes to free up space.";
-      storageWarning.style.display = "block";
-    }
-  } else {
-    const storageWarning = document.querySelector("#storage-warning");
-    if (storageWarning) {
-      storageWarning.textContent = "";
-      storageWarning.style.display = "none";
-    }
-  }
-}
-}
-
-// Function to request persistent storage
-async function requestPersistentStorage() {
-    if (navigator.storage && navigator.storage.persist) {
-      const isPersistent = await navigator.storage.persist();
-      console.log(`Persistent storage granted: ${isPersistent}`);
-  
-      // Update the UI with a message
-      const storageMessage = document.querySelector("#persistent-storage-info");
-      if (storageMessage) {
-        if (isPersistent) {
-          storageMessage.textContent =
-            "Persistent storage granted. Your data is safe!";
-          storageMessage.classList.remove("red-text");
-          storageMessage.classList.add("green-text");
+            console.log('Recipes rendered successfully to #recipe-list.');
         } else {
-          storageMessage.textContent =
-            "Persistent storage not granted. Data might be cleared under storage pressure.";
-          storageMessage.classList.remove("green-text");
-          storageMessage.classList.add("red-text");
+            console.error('Recipe list container (#recipe-list) not found.');
         }
-      }
-    }
-  }
-
-import { auth } from "./firebaseDB.js";
-import {
-    signInWithEmailAndPassword,
-    signOut
-} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-
-// Sign-In
-document.querySelector('#sign-in-button').addEventListener('click', async () => {
-    const email = document.querySelector('#email').value;
-    const password = document.querySelector('#password').value;
-    try {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        console.log('Signed in as:', userCredential.user.uid);
     } catch (error) {
-        console.error('Sign-In Error:', error.message);
+        console.error('Failed to load recipes:', error);
     }
-});
-
-// Sign-Out
-document.querySelector('#sign-out-button').addEventListener('click', async () => {
-    try {
-        await signOut(auth);
-        console.log('Signed out successfully');
-    } catch (error) {
-        console.error('Sign-Out Error:', error.message);
-    }
-});
-
-
-onAuthStateChanged(auth, (user) => {
-    if (user) {
-        console.log("User signed in:", user.uid);
-        document.querySelector('#auth-status').textContent = `Signed in as: ${user.email}`;
-        // Load user-specific data
-        loadRecipes(); // Call your data loading function
-    } else {
-        console.log("No user signed in");
-        document.querySelector('#auth-status').textContent = "Not signed in";
-        // Optionally clear the UI or show default content
-    }
-});
-
-const addRecipeToDB = async (recipe) => {
-    const user = auth.currentUser;
-    if (!user) {
-        console.error("User not signed in");
-        return;
-    }
-    const db = await openDatabase();
-    const transaction = db.transaction('recipes', 'readwrite');
-    const store = transaction.objectStore('recipes');
-    store.add({
-        uid: user.uid, // Associate with user
-        ...recipe
-    });
-    console.log("Recipe added to IndexedDB:", recipe);
-};
-
-async function loadRecipesFromDB() {
-    const user = auth.currentUser;
-    if (!user) {
-        console.error("User not authenticated");
-        return [];
-    }
-    const db = await createDB();
-    const tx = db.transaction("recipes", "readonly");
-    const store = tx.objectStore("recipes");
-    const allRecipes = await store.getAll();
-    return allRecipes.filter(recipe => recipe.uid === user.uid);
 }
 
+
+
+// Function to add a recipe to IndexedDB
+async function addRecipe(recipe) {
+    try {
+        const db = await openDB('MyRecipeBook', 1);
+        const tx = db.transaction('recipes', 'readwrite');
+        const store = tx.objectStore('recipes');
+        await store.add(recipe);
+        console.log('Recipe added to IndexedDB:', recipe);
+        loadRecipes(); // Reload recipes after adding
+    } catch (error) {
+        console.error('Failed to add recipe:', error);
+    }
+}

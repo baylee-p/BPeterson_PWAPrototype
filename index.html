@@ -49,8 +49,10 @@
     <p id="auth-status">Not signed in</p>
 
      <!-- recipes -->
-      <div class="recipes container grey-text text-darken-1">
-        <h6 class="center">My Recipes</h6>
+       <div class="recipes container grey-text text-darken-1">
+          <h6 class="center">My Recipes</h6>
+          <div id="recipe-list"></div>
+        </div>
         <div class="card-panel recipe white row">
             <img src="/img/dish.png" alt="recipe thumb">
             <div class="recipe-details">
@@ -110,7 +112,7 @@
                     <label for="title">Recipe Title</label>
                 </div>
                 <div class="input-field">
-                    <input placeholder="e.g. Tofu, mushroom, garlic" id="inredients" type="text" class="validate">
+                    <input placeholder="e.g. Tofu, mushroom, garlic" id="ingredients" type="text" class="validate">
                     <label for="ingredients">Ingredients</label>
                 </div>
                 <div class="input-field center">
@@ -120,6 +122,7 @@
         </div>
 
         <script src="/js/app.js"></script>
+        <script src="/js/index-min.js"></script>
         <script src="/js/ui.js"></script>
         <script type="module" src="/js/firebaseDB.js"></script>
 </body>
