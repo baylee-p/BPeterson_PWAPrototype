@@ -9,18 +9,19 @@ if (openDB) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-    // Initialize side navigation menus
     try {
-        const menus = document.querySelectorAll('.side-menu');
-        M.Sidenav.init(menus, { edge: 'right' });
-        console.log('Navigation menus initialized:', menus);
 
-        const forms = document.querySelectorAll('.side-form');
-        M.Sidenav.init(forms, { edge: 'left' });
-        console.log('Side forms initialized:', forms);
+        // Only run idb-related code if idb is available
+        if (typeof idb !== 'undefined') {
+            console.log('idb is available. Running IndexedDB logic.');
+            // Your idb-related code here
+        } else {
+            console.warn('idb is not available. Skipping IndexedDB logic.');
+        }
     } catch (error) {
-        console.error('Failed to initialize Materialize Sidenav:', error);
+        console.error('Error initializing UI:', error);
     }
+});
 
     // Load recipes from IndexedDB
     loadRecipes();
