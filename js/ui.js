@@ -1,3 +1,29 @@
+import { addRecipe, getRecipes } from './firebaseDB.js'; // Assuming firebaseDB.js exports these
+
+console.log('UI script loaded. Firebase app:', app);
+
+// Function to load recipes from Firestore and display in the UI
+async function loadRecipesToUI() {
+    const recipesContainer = document.querySelector('#recipes-container');
+    recipesContainer.innerHTML = ''; // Clear existing content
+
+    try {
+        const recipes = await getRecipes(); // Fetch from Firestore
+        recipes.forEach(recipe => {
+            const recipeHTML = `
+                <div class="card">
+                    <h3>${recipe.title}</h3>
+                    <p>${recipe.ingredients}</p>
+                    <p>${recipe.instructions}</p>
+                </div>
+            `;
+            recipesContainer.innerHTML += recipeHTML;
+        });
+    } catch (error) {
+        console.error('Error loading recipes:', error);
+    }
+}
+
 // Import idb library
 const { openDB } = idb;
 
@@ -216,3 +242,23 @@ async function loadRecipes() {
         console.error('Failed to load recipes:', error);
     }
 }
+
+document.querySelector('#recipe-form').addEventListener('submit', async (event) => {
+    event.preventDefault(); // Prevent page reload
+
+    const recipe = {
+        title: document.querySelector('#title').value,
+        ingredients: document.querySelector('#ingredients').value,
+        instructions: document.querySelector('#instructions').value,
+    };
+
+    try {
+        await addRecipe(recipe); // Save to Firestore
+        alert('Recipe added successfully!');
+        loadRecipesToUI(); // Refresh UI with updated recipes
+    } catch (error) {
+        console.error('Error adding recipe:', error);
+    }
+});
+
+document.addEventListener('DOMContentLoaded', loadRecipesToUI);
